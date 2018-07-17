@@ -32,6 +32,7 @@ class FriendlyErrorsWebpackPlugin {
     this.shouldClearConsole = options.clearConsole == null ? true : Boolean(options.clearConsole);
     this.formatters = concat(defaultFormatters, options.additionalFormatters);
     this.transformers = concat(defaultTransformers, options.additionalTransformers);
+    this.previousEndTimes = {};
   }
 
   apply(compiler) {
@@ -110,6 +111,26 @@ class FriendlyErrorsWebpackPlugin {
     formatErrors(topErrors, this.formatters, severity)
       .forEach(chunk => output.log(chunk));
   }
+
+  getCompileTime(stats, statsIndex) {
+    if (isMultiStats(stats)) {
+      // Webpack multi compilations run in parallel so using the longest duration.
+      // https://webpack.github.io/docs/configuration.html#multiple-configurations
+      return stats.stats
+        .reduce((time, stats, index) => Math.max(time, getCompileTime(stats, statsIndex)), 0);
+    }
+
+    const index = statsIndex || 0;
+
+    // When we have multi compilations but only one of them is rebuilt, we need to skip the
+    // unchanged compilers to report the true rebuild time.
+    if (this.previousEndTimes[index] === stats.endTime) {
+      return 0;
+    }
+
+    this.previousEndTimes[index] = stats.endTime;
+    return stats.endTime - stats.startTime;
+  }
 }
 
 function extractErrorsFromStats(stats, type) {
@@ -121,16 +142,6 @@ function extractErrorsFromStats(stats, type) {
     return uniqueBy(errors, error => error.message);
   }
   return stats.compilation[type];
-}
-
-function getCompileTime(stats) {
-  if (isMultiStats(stats)) {
-    // Webpack multi compilations run in parallel so using the longest duration.
-    // https://webpack.github.io/docs/configuration.html#multiple-configurations
-    return stats.stats
-      .reduce((time, stats) => Math.max(time, getCompileTime(stats)), 0);
-  }
-  return stats.endTime - stats.startTime;
 }
 
 function isMultiStats(stats) {
